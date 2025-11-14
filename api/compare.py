@@ -3,6 +3,7 @@ from urllib.parse import urlparse, parse_qs
 import json
 import yfinance as yf
 import pandas as pd
+import requests
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -33,11 +34,17 @@ class handler(BaseHTTPRequestHandler):
                 }).encode())
                 return
 
+            # Configurer session avec User-Agent
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            })
+
             # Récupérer les données pour chaque symbole
             all_data = {}
             for symbol in symbols:
                 try:
-                    ticker = yf.Ticker(symbol)
+                    ticker = yf.Ticker(symbol, session=session)
                     hist = ticker.history(period=range_param, interval='1d')
                     if not hist.empty:
                         # Normaliser les prix (100 = prix de départ)

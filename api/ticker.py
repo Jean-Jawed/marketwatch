@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
 import yfinance as yf
+import requests
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -21,8 +22,14 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': 'Symbol requis'}).encode())
                 return
 
+            # Configurer session avec User-Agent pour éviter le blocage Yahoo
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            })
+
             # Récupérer les données depuis yfinance
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(symbol, session=session)
             
             # Historique des prix
             hist = ticker.history(period=range_param, interval=interval)
