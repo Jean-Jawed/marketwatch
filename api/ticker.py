@@ -1,8 +1,9 @@
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
-import yfinance as yf
 import requests
+import os
+from datetime import datetime, timedelta
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -22,19 +23,69 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': 'Symbol requis'}).encode())
                 return
 
-            # Configurer session avec User-Agent pour éviter le blocage Yahoo
-            session = requests.Session()
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            })
+            # Récupérer la clé API Polygon.io
+            api_key = os.environ.get('POLYGON_API_KEY')
+            if not api_key:
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'Clé API non configurée'}).encode())
+                return
 
-            # Récupérer les données depuis yfinance
-            ticker = yf.Ticker(symbol, session=session)
+            # Convertir le range en dates
+            end_date = datetime.now()
+            if range_param == '1d':
+                start_date = end_date - timedelta(days=1)
+            elif range_param == '5d':
+                start_date = end_date - timedelta(days=5)
+            elif range_param == '1mo':
+                start_date = end_date - timedelta(days=30)
+            elif range_param == '1y':
+                start_date = end_date - timedelta(days=365)
+            elif range_param == '5y':
+                start_date = end_date - timedelta(days=365*5)
+            else:
+                start_date = end_date - timedelta(days=30)
+
+            # Formater les dates pour Polygon.io
+            start_str = start_date.strftime('%Y-%m-%d')
+            end_str = end_date.strftime('%Y-%m-%d')
+
+            # Déterminer le timespan pour Polygon.io
+            if interval in ['5m', '15m', '30m']:
+                timespan = 'minute'
+                multiplier = int(interval.replace('m', ''))
+            elif interval == '1h':
+                timespan = 'hour'
+                multiplier = 1
+            elif interval == '1d':
+                timespan = 'day'
+                multiplier = 1
+            elif interval == '1wk':
+                timespan = 'week'
+                multiplier = 1
+            else:
+                timespan = 'day'
+                multiplier = 1
+
+            # Récupérer les données historiques depuis Polygon.io
+            aggs_url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{start_str}/{end_str}"
+            aggs_response = requests.get(aggs_url, params={'adjusted': 'true', 'sort': 'asc', 'apiKey': api_key})
             
-            # Historique des prix
-            hist = ticker.history(period=range_param, interval=interval)
+            if aggs_response.status_code != 200:
+                self.send_response(404)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'error': f'Données indisponibles pour {symbol}'
+                }).encode())
+                return
+
+            aggs_data = aggs_response.json()
             
-            if hist.empty:
+            if aggs_data.get('status') != 'OK' or not aggs_data.get('results'):
                 self.send_response(404)
                 self.send_header('Content-type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
@@ -46,28 +97,58 @@ class handler(BaseHTTPRequestHandler):
 
             # Formater les données historiques
             history_data = []
-            for idx, row in hist.iterrows():
+            for bar in aggs_data['results']:
+                timestamp = bar['t'] / 1000  # Convertir ms en secondes
+                date_obj = datetime.fromtimestamp(timestamp)
                 history_data.append({
-                    'date': idx.strftime('%Y-%m-%d %H:%M'),
-                    'open': float(row['Open']),
-                    'high': float(row['High']),
-                    'low': float(row['Low']),
-                    'close': float(row['Close']),
-                    'volume': int(row['Volume']) if 'Volume' in row else 0
+                    'date': date_obj.strftime('%Y-%m-%d %H:%M'),
+                    'open': float(bar['o']),
+                    'high': float(bar['h']),
+                    'low': float(bar['l']),
+                    'close': float(bar['c']),
+                    'volume': int(bar['v'])
                 })
 
-            # Informations du ticker
-            info = ticker.info
+            # Récupérer les infos du ticker (snapshot)
+            snapshot_url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{symbol}"
+            snapshot_response = requests.get(snapshot_url, params={'apiKey': api_key})
+            
             ticker_info = {
-                'name': info.get('longName', symbol),
-                'currentPrice': info.get('currentPrice') or info.get('regularMarketPrice'),
-                'changePercent': info.get('regularMarketChangePercent', 0),
-                'fiftyTwoWeekHigh': info.get('fiftyTwoWeekHigh'),
-                'fiftyTwoWeekLow': info.get('fiftyTwoWeekLow'),
-                'averageVolume': info.get('averageVolume'),
-                'marketCap': info.get('marketCap'),
-                'peRatio': info.get('trailingPE'),
+                'name': symbol,
+                'currentPrice': None,
+                'changePercent': 0,
+                'fiftyTwoWeekHigh': None,
+                'fiftyTwoWeekLow': None,
+                'averageVolume': None,
+                'marketCap': None,
+                'peRatio': None,
             }
+
+            if snapshot_response.status_code == 200:
+                snapshot_data = snapshot_response.json()
+                if snapshot_data.get('status') == 'OK' and snapshot_data.get('ticker'):
+                    ticker = snapshot_data['ticker']
+                    day = ticker.get('day', {})
+                    prev_day = ticker.get('prevDay', {})
+                    
+                    ticker_info['currentPrice'] = day.get('c')
+                    
+                    # Calculer le changePercent
+                    if prev_day.get('c') and day.get('c'):
+                        prev_close = prev_day['c']
+                        current = day['c']
+                        ticker_info['changePercent'] = ((current - prev_close) / prev_close) * 100
+
+            # Récupérer les détails du ticker pour plus d'infos
+            details_url = f"https://api.polygon.io/v3/reference/tickers/{symbol}"
+            details_response = requests.get(details_url, params={'apiKey': api_key})
+            
+            if details_response.status_code == 200:
+                details_data = details_response.json()
+                if details_data.get('status') == 'OK' and details_data.get('results'):
+                    details = details_data['results']
+                    ticker_info['name'] = details.get('name', symbol)
+                    ticker_info['marketCap'] = details.get('market_cap')
 
             result = {
                 'symbol': symbol,
