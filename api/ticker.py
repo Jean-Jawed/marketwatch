@@ -25,6 +25,7 @@ class handler(BaseHTTPRequestHandler):
 
             # Récupérer la clé API Polygon.io
             api_key = os.environ.get('POLYGON_API_KEY')
+            print(f"DEBUG: API Key present: {api_key is not None}")
             if not api_key:
                 self.send_response(500)
                 self.send_header('Content-type', 'application/json')
@@ -71,7 +72,10 @@ class handler(BaseHTTPRequestHandler):
 
             # Récupérer les données historiques depuis Polygon.io
             aggs_url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{start_str}/{end_str}"
+            print(f"DEBUG: Calling URL: {aggs_url}")
             aggs_response = requests.get(aggs_url, params={'adjusted': 'true', 'sort': 'asc', 'apiKey': api_key})
+            print(f"DEBUG: Status code: {aggs_response.status_code}")
+            print(f"DEBUG: Response: {aggs_response.text[:200]}")
             
             if aggs_response.status_code != 200:
                 self.send_response(404)
@@ -86,6 +90,8 @@ class handler(BaseHTTPRequestHandler):
             aggs_data = aggs_response.json()
             
             if aggs_data.get('status') != 'OK' or not aggs_data.get('results'):
+                print(f"DEBUG: Polygon response status: {aggs_data.get('status')}")
+                print(f"DEBUG: Results present: {aggs_data.get('results') is not None}")
                 self.send_response(404)
                 self.send_header('Content-type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
