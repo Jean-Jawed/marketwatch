@@ -2,31 +2,10 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
 import yfinance as yf
-import sys
-import os
-
-# Ajouter le répertoire parent au path pour importer utils
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from utils.cache import get_cache, set_cache
-from utils.rate_limit import check_rate_limit, get_client_ip
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            # Rate limiting
-            client_ip = get_client_ip(self)
-            is_allowed, remaining = check_rate_limit(client_ip)
-            
-            if not is_allowed:
-                self.send_response(429)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({
-                    'error': 'Rate limit dépassé. Veuillez réessayer plus tard.'
-                }).encode())
-                return
-
             # Parse params
             parsed = urlparse(self.path)
             params = parse_qs(parsed.query)
@@ -40,19 +19,6 @@ class handler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': 'Symbol requis'}).encode())
-                return
-
-            # Vérifier le cache
-            cache_key = f"{symbol}:{range_param}:{interval}"
-            cached_data = get_cache(cache_key)
-            
-            if cached_data:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('X-Rate-Limit-Remaining', str(remaining))
-                self.end_headers()
-                self.wfile.write(json.dumps(cached_data).encode())
                 return
 
             # Récupérer les données depuis yfinance
@@ -102,13 +68,9 @@ class handler(BaseHTTPRequestHandler):
                 'history': history_data
             }
 
-            # Mettre en cache
-            set_cache(cache_key, result, ttl=300)
-
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('X-Rate-Limit-Remaining', str(remaining))
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
 

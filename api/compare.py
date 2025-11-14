@@ -3,30 +3,10 @@ from urllib.parse import urlparse, parse_qs
 import json
 import yfinance as yf
 import pandas as pd
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from utils.cache import get_cache, set_cache
-from utils.rate_limit import check_rate_limit, get_client_ip
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            # Rate limiting
-            client_ip = get_client_ip(self)
-            is_allowed, remaining = check_rate_limit(client_ip)
-            
-            if not is_allowed:
-                self.send_response(429)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({
-                    'error': 'Rate limit dépassé'
-                }).encode())
-                return
-
             # Parse params
             parsed = urlparse(self.path)
             params = parse_qs(parsed.query)
@@ -51,19 +31,6 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({
                     'error': 'Au moins 2 symbols requis pour comparaison'
                 }).encode())
-                return
-
-            # Vérifier le cache
-            cache_key = f"compare:{','.join(sorted(symbols))}:{range_param}"
-            cached_data = get_cache(cache_key)
-            
-            if cached_data:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('X-Rate-Limit-Remaining', str(remaining))
-                self.end_headers()
-                self.wfile.write(json.dumps(cached_data).encode())
                 return
 
             # Récupérer les données pour chaque symbole
@@ -109,13 +76,9 @@ class handler(BaseHTTPRequestHandler):
                 'data': result_data
             }
 
-            # Mettre en cache
-            set_cache(cache_key, result, ttl=300)
-
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('X-Rate-Limit-Remaining', str(remaining))
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
 
