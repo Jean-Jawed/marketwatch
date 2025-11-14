@@ -89,7 +89,7 @@ class handler(BaseHTTPRequestHandler):
 
             aggs_data = aggs_response.json()
             
-            if aggs_data.get('status') != 'OK' or not aggs_data.get('results'):
+            if aggs_data.get('status') not in ['OK', 'DELAYED'] or not aggs_data.get('results'):
                 print(f"DEBUG: Polygon response status: {aggs_data.get('status')}")
                 print(f"DEBUG: Results present: {aggs_data.get('results') is not None}")
                 self.send_response(404)
